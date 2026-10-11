@@ -22,40 +22,36 @@ const Dashboard = () => {
           invoiceRes,
           customerRes,
           amountRes,
-          totalPaidAmount,
-          balanceAmount,
-        ] = await Promise.all([
+          totalPaidRes,
+          balanceRes,
+        ] = await Promise.allSettled([
           API.get("/api/invoices"),
           API.get("/api/invoices/total-customers"),
           API.get("/api/analytics/total-amount"),
           API.get("/api/analytics/total-paid-amount"),
           API.get("/api/analytics/total-balance"),
         ]);
-        //console.log(invoiceRes.data.length, totalCustomers);
-        setLoading(false);
-        setInvoiceCount(
-          Array.isArray(invoiceRes.data) ? invoiceRes.data.length : 0
-        );
-        setTotalCustomers(customerRes.data?.totalCustomers || 0);
-        setTotalAmount(amountRes.data?.totalAmount || 0);
-        setTotalPaidAmount(totalPaidAmount.data?.totalPaid || 0);
-        setBalanceAmount(balanceAmount.data?.totalBalanceAmount || 0);
+
+        if (invoiceRes.status === "fulfilled" && Array.isArray(invoiceRes.value?.data)) {
+          setInvoiceCount(invoiceRes.value.data.length);
+        }
+        if (customerRes.status === "fulfilled") {
+          setTotalCustomers(customerRes.value?.data?.totalCustomers || 0);
+        }
+        if (amountRes.status === "fulfilled") {
+          setTotalAmount(amountRes.value?.data?.totalAmount || 0);
+        }
+        if (totalPaidRes.status === "fulfilled") {
+          setTotalPaidAmount(totalPaidRes.value?.data?.totalPaid || 0);
+        }
+        if (balanceRes.status === "fulfilled") {
+          setBalanceAmount(balanceRes.value?.data?.totalBalanceAmount || 0);
+        }
       } catch (error) {
-        console.error(error);
+        console.error("Dashboard fetch error:", error);
+      } finally {
+        setLoading(false);
       }
-
-      // const data = await getInvoices();
-      // const customers = await getAllCustomers();
-
-      // console.log(data.length, customers);
-
-      // setTotalCustomers(customers);
-
-      // if (Array.isArray(data)) {
-      //   setInvoiceCount(data.length);
-      // } else {
-      //   setInvoiceCount(0);
-      // }
     };
     fetchData();
   }, []);
