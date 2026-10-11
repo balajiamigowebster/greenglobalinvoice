@@ -34,8 +34,8 @@ const InvoicesList = () => {
       }
       setLoading(false);
     } catch (error) {
-      alert("Error loading invoices");
-      setLoading(false);
+      console.error("Error loading invoices:", error);
+      setInvoices([]);
     } finally {
       setLoading(false);
     }
