@@ -3,6 +3,7 @@ import { ToastContainer, Zoom, toast } from "react-toastify";
 import { ImCross } from "react-icons/im";
 import { useNavigate, useParams } from "react-router-dom";
 import API from "../api";
+import { numberToWordsIndian } from "../utils/numberToWords";
 
 const NewBill = () => {
   const navigate = useNavigate();
@@ -27,6 +28,7 @@ const NewBill = () => {
         _uploading: false, // local flag per product (not saved to server)
       },
     ],
+    shippingCharge: 0,
     totalAmount: 0,
     paidAmount: "",
     balanceAmount: 0,
@@ -41,6 +43,7 @@ const NewBill = () => {
           setInvoice((prev) => ({
             ...prev,
             ...res.data,
+            shippingCharge: res.data.shippingCharge ?? 0,
             products: res.data.products?.length
               ? res.data.products
               : prev.products,
@@ -55,10 +58,12 @@ const NewBill = () => {
 
   const removeProductRow = (index) => {
     const updatedProducts = invoice.products.filter((_, i) => i !== index);
-    const total = updatedProducts.reduce(
+    const subtotal = updatedProducts.reduce(
       (acc, item) => acc + (item.amount || 0),
       0
     );
+    const shipping = parseFloat(invoice.shippingCharge || 0);
+    const total = subtotal + shipping;
 
     setInvoice((prev) => ({
       ...prev,
@@ -84,13 +89,13 @@ const NewBill = () => {
   const addProductRow = () => {
     const lastProduct = invoice.products[invoice.products.length - 1];
     if (
-      !lastProduct.title.trim() ||
-      !lastProduct.description.trim() ||
-      !lastProduct.quantity ||
-      !lastProduct.rate
+      lastProduct &&
+      (!lastProduct.title?.trim() ||
+        !lastProduct.quantity ||
+        !lastProduct.rate)
     ) {
       toast.warning(
-        "Please complete the current product details before adding a new one"
+        "Please complete the product title, quantity, and rate before adding a new one"
       );
       return;
     }
@@ -182,10 +187,12 @@ const NewBill = () => {
       updatedProducts[index].amount = baseAmount + cgstAmmount + sgstAmount;
     }
 
-    const total = updatedProducts.reduce(
+    const subtotal = updatedProducts.reduce(
       (acc, item) => acc + (item.amount || 0),
       0
     );
+    const shipping = parseFloat(invoice.shippingCharge || 0);
+    const total = subtotal + shipping;
 
     setInvoice((prev) => ({
       ...prev,
@@ -373,7 +380,6 @@ const NewBill = () => {
                             e.target.value
                           )
                         }
-                        required
                         className="p-1 border w-full"
                       />
                     </td>
@@ -443,49 +449,99 @@ const NewBill = () => {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-5 sm:grid-cols-3 gap-4">
-            <div className="">
-              <label className="font-bold" htmlFor="">
+          <div className="grid grid-cols-1 md:grid-cols-5 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="font-bold text-sm block mb-1">
+                Sub Total :
+              </label>
+              <input
+                type="number"
+                placeholder="Sub Total"
+                className="border p-2 rounded w-full bg-gray-50 text-gray-700 font-medium"
+                value={invoice.products.reduce((acc, item) => acc + (parseFloat(item.amount) || 0), 0).toFixed(2)}
+                readOnly
+              />
+            </div>
+            <div>
+              <label className="font-bold text-sm block mb-1">
+                Shipping Charge :
+              </label>
+              <input
+                type="number"
+                placeholder="0"
+                className="border p-2 rounded w-full focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                value={invoice.shippingCharge ?? ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const shipping = parseFloat(val) || 0;
+                  const subtotal = invoice.products.reduce(
+                    (acc, item) => acc + (parseFloat(item.amount) || 0),
+                    0
+                  );
+                  const total = subtotal + shipping;
+                  const paid = parseFloat(invoice.paidAmount) || 0;
+                  setInvoice((prev) => ({
+                    ...prev,
+                    shippingCharge: val === "" ? "" : shipping,
+                    totalAmount: total,
+                    balanceAmount: total - paid,
+                  }));
+                }}
+              />
+            </div>
+            <div>
+              <label className="font-bold text-sm block mb-1">
                 Total :
               </label>
               <input
                 type="number"
                 placeholder="Total"
-                className="border p-2 rounded w-full"
+                className="border p-2 rounded w-full bg-gray-50 font-bold text-gray-900"
                 value={invoice.totalAmount}
                 readOnly
               />
             </div>
             <div>
-              <label className="font-bold" htmlFor="">
+              <label className="font-bold text-sm block mb-1">
                 Paid :
               </label>
               <input
                 type="number"
-                placeholder="Paid"
+                placeholder="0"
                 className="border p-2 rounded w-full"
                 value={invoice.paidAmount}
                 onChange={(e) => {
-                  const paid = parseFloat(e.target.value) || 0;
+                  const val = e.target.value;
+                  const paid = parseFloat(val) || 0;
                   setInvoice((prev) => ({
                     ...prev,
-                    paidAmount: paid,
+                    paidAmount: val === "" ? "" : paid,
                     balanceAmount: prev.totalAmount - paid,
                   }));
                 }}
               />
             </div>
             <div>
-              <label className="font-bold" htmlFor="">
+              <label className="font-bold text-sm block mb-1">
                 Balance :
               </label>
               <input
                 type="number"
                 placeholder="Balance"
-                className="border p-2 rounded w-full"
+                className="border p-2 rounded w-full bg-gray-50 font-bold text-gray-900"
                 value={invoice.balanceAmount}
                 readOnly
               />
+            </div>
+          </div>
+
+          {/* Amount In Words */}
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
+            <div>
+              <span className="font-semibold text-gray-700">Total In Words: </span>
+              <span className="italic font-bold text-emerald-800">
+                {numberToWordsIndian(invoice.totalAmount)}
+              </span>
             </div>
           </div>
 

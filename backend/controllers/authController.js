@@ -29,8 +29,48 @@ exports.register = async (req, res) => {
   }
 };
 
+const DEMO_USER = {
+  id: "660e1f8a8e1b123456789abc",
+  name: "Demo Admin",
+  email: "admin@example.com",
+  password: "admin123",
+};
+
 exports.login = async (req, res) => {
   const { email, password } = req.body;
+  const isProd = process.env.NODE_ENV === "production";
+
+  // Check demo credentials fallback
+  if (
+    email &&
+    password &&
+    email.trim().toLowerCase() === DEMO_USER.email &&
+    password === DEMO_USER.password
+  ) {
+    const token = jwt.sign(
+      { userId: DEMO_USER.id },
+      process.env.JWT_SECRET || "default_secret_key",
+      { expiresIn: "7d" }
+    );
+
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    return res.status(200).json({
+      msg: "Login successful",
+      user: {
+        id: DEMO_USER.id,
+        _id: DEMO_USER.id,
+        name: DEMO_USER.name,
+        email: DEMO_USER.email,
+      },
+    });
+  }
+
   try {
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ msg: "User not found" });
@@ -38,14 +78,16 @@ exports.login = async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ msg: "Invalid credentials" });
 
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET || "default_secret_key",
+      { expiresIn: "7d" }
+    );
 
     res.cookie("token", token, {
       httpOnly: true,
-      secure: true,
-      sameSite: "none",
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -53,6 +95,7 @@ exports.login = async (req, res) => {
       msg: "Login successful",
       user: {
         id: user._id,
+        _id: user._id,
         name: user.name,
         email: user.email,
       },
@@ -63,16 +106,28 @@ exports.login = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
+  const isProd = process.env.NODE_ENV === "production";
   res.clearCookie("token", {
     httpOnly: true,
-    sameSite: "Lax",
-    secure: false,
+    sameSite: isProd ? "none" : "lax",
+    secure: isProd,
   });
   res.status(200).json({ msg: "Logged out successfully" });
 };
 
 exports.getMe = async (req, res) => {
   try {
+    if (req.user && req.user.userId === DEMO_USER.id) {
+      return res.status(200).json({
+        user: {
+          id: DEMO_USER.id,
+          _id: DEMO_USER.id,
+          name: DEMO_USER.name,
+          email: DEMO_USER.email,
+        },
+      });
+    }
+
     const user = await User.findById(req.user.userId).select("-password");
     if (!user) return res.status(404).json({ msg: "User not found" });
     res.status(200).json({ user });

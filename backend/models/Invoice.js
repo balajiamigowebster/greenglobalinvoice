@@ -30,8 +30,11 @@ const invoiceSchema = new mongoose.Schema({
   invoiceDate: Date,
 
   address: String,
-  invoiceDate: Date,
   products: [productSchema],
+  shippingCharge: {
+    type: Number,
+    default: 0,
+  },
   totalAmount: Number,
   paidAmount: Number,
   balanceAmount: Number,

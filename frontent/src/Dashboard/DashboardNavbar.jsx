@@ -30,7 +30,7 @@ const DashboardNavbar = () => {
               <img
                 src={setting.logo}
                 alt="Logo"
-                className="w-10 h-10 rounded-full object-cover"
+                className="h-9 w-auto max-w-[120px] rounded object-contain bg-white/10 p-0.5"
               />
             )}
             <span className="font-extrabold text-xl">

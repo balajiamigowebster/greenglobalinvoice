@@ -10,7 +10,7 @@ const analyticRoute = require("./routes/invoiceAnalyticRoute.js");
 const settingRoutes = require("./routes/settingRoutes");
 
 const app = express();
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 4000;
 
 app.use(express.json());
 app.use(cookieParser());

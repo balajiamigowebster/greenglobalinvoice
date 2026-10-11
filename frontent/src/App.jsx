@@ -35,7 +35,7 @@ import Profile from "./Dashboard/Profile";
    Later this can come from your backend/subscription API.
 ============================================================================ */
 
-const SITE_UNLOCKED = false;
+const SITE_UNLOCKED = true;
 
 /* ============================================================================
    RENEWAL REQUIRED PAGE
@@ -781,6 +781,7 @@ const App = () => {
             </ProtectedRoutes>
           }
         >
+          <Route index element={<Dashboard />} />
           <Route path="dashboard" element={<Dashboard />} />
 
           <Route path="customer" element={<Customers />} />
@@ -832,7 +833,7 @@ const App = () => {
             AUTH
         ============================================================ */}
 
-        <Route path="/" element={<Login />} />
+        <Route path="/login" element={<Login />} />
 
         {/* ============================================================
             404

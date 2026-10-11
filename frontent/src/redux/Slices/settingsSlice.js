@@ -25,8 +25,7 @@ export const saveSetting = createAsyncThunk(
       const res = await API.post("/api/settings", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      //console.log(res.data.data);
-      res.data.data;
+      return res.data.data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
         error.response?.data?.message || "Failed to save setting"
