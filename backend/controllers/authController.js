@@ -38,7 +38,7 @@ const DEMO_USER = {
 
 exports.login = async (req, res) => {
   const { email, password } = req.body;
-  const isProd = process.env.NODE_ENV === "production";
+  const isProd = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
 
   // Check demo credentials fallback
   if (
@@ -106,7 +106,7 @@ exports.login = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
-  const isProd = process.env.NODE_ENV === "production";
+  const isProd = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
   res.clearCookie("token", {
     httpOnly: true,
     sameSite: isProd ? "none" : "lax",
