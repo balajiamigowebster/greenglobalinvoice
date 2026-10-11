@@ -5,7 +5,7 @@ const API = axios.create({
     import.meta.env.VITE_API_URL ||
     (import.meta.env.DEV
       ? "http://localhost:4000"
-      : "https://backend-balajiamigowebsters-projects.vercel.app"),
+      : "https://backend-bice-seven-54.vercel.app"),
   withCredentials: true,
 });
 
