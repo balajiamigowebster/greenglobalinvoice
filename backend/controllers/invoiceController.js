@@ -121,27 +121,62 @@ let memoryInvoices = [
   },
 ];
 
+const fs = require("fs");
+const path = require("path");
+const TMP_INVOICE_FILE = path.join("/tmp", "invoice_cache.json");
+
+const loadCachedInvoices = () => {
+  try {
+    if (fs.existsSync(TMP_INVOICE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(TMP_INVOICE_FILE, "utf-8"));
+      if (Array.isArray(data) && data.length > 0) {
+        return data;
+      }
+    }
+  } catch (e) {}
+  return memoryInvoices;
+};
+
+const saveCachedInvoices = (list) => {
+  try {
+    fs.writeFileSync(TMP_INVOICE_FILE, JSON.stringify(list), "utf-8");
+  } catch (e) {}
+};
+
+// Initialize from cache if exists
+memoryInvoices = loadCachedInvoices();
+
 const isDbAvailable = () => mongoose.connection.readyState === 1;
 
+const computeNextInvoiceNumber = (list) => {
+  let max = 2; // Baseline INV0002
+  const items = Array.isArray(list) ? list : [];
+  for (const item of items) {
+    if (item.invoiceNumber) {
+      const match = String(item.invoiceNumber).match(/\d+/);
+      const val = match ? parseInt(match[0], 10) : 0;
+      if (val > max) max = val;
+    }
+  }
+  return `INV${(max + 1).toString().padStart(4, "0")}`;
+};
+
 exports.createInvoice = async (req, res) => {
+  memoryInvoices = loadCachedInvoices();
+  const nextInvoiceNumber = req.body.invoiceNumber || computeNextInvoiceNumber(memoryInvoices);
+
   try {
     if (isDbAvailable()) {
-      const lastInvoice = await Invoice.findOne().sort({ invoiceNumber: -1 });
-      let newNumber = 1;
-
-      if (lastInvoice && lastInvoice.invoiceNumber) {
-        const lastNumber = parseInt(
-          lastInvoice.invoiceNumber.replace("INV", ""),
-          10
-        );
-        newNumber = lastNumber + 1;
-      }
-
-      const autoInvoiceNumber = `INV${newNumber.toString().padStart(4, "0")}`;
+      const allDb = await Invoice.find({}, "invoiceNumber");
+      const dbNextNumber = req.body.invoiceNumber || computeNextInvoiceNumber(allDb);
 
       const invoice = new Invoice({
         ...req.body,
-        invoiceNumber: autoInvoiceNumber,
+        shippingCharge: Number(req.body.shippingCharge || 0),
+        totalAmount: Number(req.body.totalAmount || 0),
+        paidAmount: Number(req.body.paidAmount || 0),
+        balanceAmount: Number(req.body.balanceAmount || 0),
+        invoiceNumber: dbNextNumber,
       });
 
       await invoice.save();
@@ -158,6 +193,10 @@ exports.createInvoice = async (req, res) => {
         }
       }
 
+      // Also keep memory cache in sync
+      memoryInvoices.unshift(invoice.toObject());
+      saveCachedInvoices(memoryInvoices);
+
       return res.status(201).json({
         msg: "Invoice save Successfull",
         invoice,
@@ -168,14 +207,20 @@ exports.createInvoice = async (req, res) => {
   }
 
   // Memory fallback
-  const nextNum = memoryInvoices.length + 1;
   const newInv = {
     ...req.body,
-    _id: new mongoose.Types.ObjectId().toString(),
-    invoiceNumber: `INV${nextNum.toString().padStart(4, "0")}`,
-    createAt: new Date(),
+    _id: req.body._id || new mongoose.Types.ObjectId().toString(),
+    shippingCharge: Number(req.body.shippingCharge || 0),
+    totalAmount: Number(req.body.totalAmount || 0),
+    paidAmount: Number(req.body.paidAmount || 0),
+    balanceAmount: Number(req.body.balanceAmount || 0),
+    invoiceNumber: nextInvoiceNumber,
+    createAt: req.body.createAt || new Date(),
   };
+
   memoryInvoices.unshift(newInv);
+  saveCachedInvoices(memoryInvoices);
+
   res.status(201).json({
     msg: "Invoice save Successfull",
     invoice: newInv,
@@ -183,6 +228,7 @@ exports.createInvoice = async (req, res) => {
 };
 
 exports.getAllInvoices = async (req, res) => {
+  memoryInvoices = loadCachedInvoices();
   try {
     if (isDbAvailable()) {
       const { date } = req.query;
@@ -211,6 +257,7 @@ exports.getAllInvoices = async (req, res) => {
 };
 
 exports.getInvoiceById = async (req, res) => {
+  memoryInvoices = loadCachedInvoices();
   try {
     if (isDbAvailable()) {
       const invoice = await Invoice.findById(req.params.id);
@@ -233,9 +280,14 @@ exports.getInvoiceById = async (req, res) => {
 };
 
 exports.deleInvoice = async (req, res) => {
+  memoryInvoices = loadCachedInvoices();
   try {
     if (isDbAvailable()) {
       await Invoice.findByIdAndDelete(req.params.id);
+      memoryInvoices = memoryInvoices.filter(
+        (i) => String(i._id) !== req.params.id
+      );
+      saveCachedInvoices(memoryInvoices);
       return res.json({ msg: "Invoice Deleted Successfully" });
     }
   } catch (error) {
@@ -245,16 +297,23 @@ exports.deleInvoice = async (req, res) => {
   memoryInvoices = memoryInvoices.filter(
     (i) => String(i._id) !== req.params.id
   );
+  saveCachedInvoices(memoryInvoices);
   res.json({ msg: "Invoice Deleted Successfully" });
 };
 
 exports.editInvoice = async (req, res) => {
+  memoryInvoices = loadCachedInvoices();
   try {
     if (isDbAvailable()) {
       const updated = await Invoice.findByIdAndUpdate(req.params.id, req.body, {
         new: true,
       });
       if (updated) {
+        const idx = memoryInvoices.findIndex((i) => String(i._id) === req.params.id);
+        if (idx !== -1) {
+          memoryInvoices[idx] = updated.toObject();
+        }
+        saveCachedInvoices(memoryInvoices);
         return res.json(updated);
       }
     }
@@ -265,6 +324,7 @@ exports.editInvoice = async (req, res) => {
   const idx = memoryInvoices.findIndex((i) => String(i._id) === req.params.id);
   if (idx !== -1) {
     memoryInvoices[idx] = { ...memoryInvoices[idx], ...req.body };
+    saveCachedInvoices(memoryInvoices);
     return res.json(memoryInvoices[idx]);
   }
 
@@ -272,6 +332,7 @@ exports.editInvoice = async (req, res) => {
 };
 
 exports.getTotalCustomers = async (req, res) => {
+  memoryInvoices = loadCachedInvoices();
   try {
     if (isDbAvailable()) {
       const customers = await Invoice.distinct("customerName");

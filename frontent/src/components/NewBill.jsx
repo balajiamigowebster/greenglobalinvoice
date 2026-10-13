@@ -4,6 +4,11 @@ import { ImCross } from "react-icons/im";
 import { useNavigate, useParams } from "react-router-dom";
 import API from "../api";
 import { numberToWordsIndian } from "../utils/numberToWords";
+import {
+  saveInvoiceLocally,
+  updateInvoiceLocally,
+  getInvoiceByIdLocally,
+} from "../services/invoiceStorage";
 
 const NewBill = () => {
   const navigate = useNavigate();
@@ -38,23 +43,46 @@ const NewBill = () => {
 
   useEffect(() => {
     if (invoiceId) {
+      // First check local storage for instant loading
+      const localInv = getInvoiceByIdLocally(invoiceId);
+      if (localInv) {
+        setInvoice((prev) => ({
+          ...prev,
+          ...localInv,
+          shippingCharge: localInv.shippingCharge ?? 0,
+          products: localInv.products?.length
+            ? localInv.products
+            : prev.products,
+          paidAmount: localInv.paidAmount ?? 0,
+          balanceAmount: localInv.balanceAmount ?? 0,
+        }));
+      }
+
+      // Also fetch from server to sync
       API.get(`/api/invoices/${invoiceId}`)
-        .then((res) =>
-          setInvoice((prev) => ({
-            ...prev,
-            ...res.data,
-            shippingCharge: res.data.shippingCharge ?? 0,
-            products: res.data.products?.length
-              ? res.data.products
-              : prev.products,
-            paidAmount: res.data.paidAmount ?? 0,
-            balanceAmount: res.data.balanceAmount ?? 0,
-          }))
-        )
-        .catch(() => toast.error("Failed to load invoice"));
+        .then((res) => {
+          if (res.data) {
+            setInvoice((prev) => ({
+              ...prev,
+              ...res.data,
+              shippingCharge: res.data.shippingCharge ?? 0,
+              products: res.data.products?.length
+                ? res.data.products
+                : prev.products,
+              paidAmount: res.data.paidAmount ?? 0,
+              balanceAmount: res.data.balanceAmount ?? 0,
+            }));
+          }
+        })
+        .catch((err) => {
+          console.log("Server invoice fetch notice:", err.message);
+          if (!localInv) {
+            toast.error("Failed to load invoice");
+          }
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [invoiceId]);
 
   const removeProductRow = (index) => {
     const updatedProducts = invoice.products.filter((_, i) => i !== index);
@@ -120,36 +148,77 @@ const NewBill = () => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      // Remove local-only flags before sending
+      // Clean and sanitize products
+      const cleanProducts = invoice.products.map(({ _uploading, ...rest }) => ({
+        ...rest,
+        rate: Number(rest.rate || 0),
+        quantity: Number(rest.quantity || 0),
+        cgst: Number(rest.cgst || 0),
+        sgst: Number(rest.sgst || 0),
+        amount: Number(rest.amount || 0),
+      }));
+
+      const totalAmt = Number(invoice.totalAmount || 0);
+      const paidAmt = Number(invoice.paidAmount || 0);
+      const balAmt = Number(invoice.balanceAmount ?? (totalAmt - paidAmt));
+      const shipCharge = Number(invoice.shippingCharge || 0);
+
       const payload = {
         ...invoice,
-        products: invoice.products.map(({ _uploading, ...rest }) => rest),
+        products: cleanProducts,
+        shippingCharge: shipCharge,
+        totalAmount: totalAmt,
+        paidAmount: paidAmt,
+        balanceAmount: balAmt,
       };
 
       if (invoiceId) {
-        const res = await API.put(`/api/invoices/${invoiceId}`, payload);
-        if (res.status === 200) {
-          toast.success("Invoice Updated Successfully", {
-            onClose: () => {
-              setSubmitting(false);
-              navigate("/invoices");
-            },
-          });
+        // 1. Immediately update locally to ensure user changes are never lost
+        updateInvoiceLocally(invoiceId, payload);
+
+        // 2. Also sync to backend
+        try {
+          const res = await API.put(`/api/invoices/${invoiceId}`, payload);
+          if (res.data) {
+            updateInvoiceLocally(invoiceId, res.data);
+          }
+        } catch (backendErr) {
+          console.log("Backend update sync note:", backendErr.message);
         }
+
+        toast.success("Invoice Updated Successfully", {
+          autoClose: 800,
+          onClose: () => {
+            setSubmitting(false);
+            navigate("/invoices");
+          },
+        });
+        setTimeout(() => navigate("/invoices"), 900);
       } else {
-        const res = await API.post("/api/invoices", payload);
-        if (res.status === 201) {
-          toast.success("Invoice Created Successfully", {
-            onClose: () => {
-              setSubmitting(false);
-              navigate("/invoices");
-            },
-          });
+        // 1. Immediately save locally with generated invoice number and ID
+        const localSaved = saveInvoiceLocally(payload);
+
+        // 2. Also sync to backend
+        try {
+          const res = await API.post("/api/invoices", payload);
+          if (res.data && res.data.invoice) {
+            updateInvoiceLocally(localSaved._id, res.data.invoice);
+          }
+        } catch (backendErr) {
+          console.log("Backend create sync note:", backendErr.message);
         }
-        setTimeout(() => navigate("/invoices"), 1000);
+
+        toast.success("Invoice Created Successfully", {
+          autoClose: 800,
+          onClose: () => {
+            setSubmitting(false);
+            navigate("/invoices");
+          },
+        });
+        setTimeout(() => navigate("/invoices"), 900);
       }
     } catch (error) {
-      console.error(error);
+      console.error("Save error:", error);
       toast.error("Something went wrong", {
         onClose: () => {
           setSubmitting(false);

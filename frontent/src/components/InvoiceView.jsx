@@ -6,6 +6,7 @@ import html2canvas from "html2canvas";
 import { useDispatch, useSelector } from "react-redux";
 import { getSettings } from "../redux/Slices/settingsSlice";
 import { numberToWordsIndian } from "../utils/numberToWords";
+import { getInvoiceByIdLocally } from "../services/invoiceStorage";
 
 const formatDate = (dateStr) => {
   if (!dateStr) return "";
@@ -27,7 +28,7 @@ const formatCurrency = (val) => {
 
 const InvoiceView = () => {
   const { id } = useParams();
-  const [invoice, setInvoice] = useState(null);
+  const [invoice, setInvoice] = useState(() => getInvoiceByIdLocally(id));
   const [setting, setSetting] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const printRef = useRef();
@@ -48,12 +49,21 @@ const InvoiceView = () => {
   }, [items]);
 
   useEffect(() => {
+    const local = getInvoiceByIdLocally(id);
+    if (local) {
+      setInvoice(local);
+    }
+
     const fetchInvoice = async () => {
       try {
         const res = await API.get(`/api/invoices/${id}`);
-        setInvoice(res.data);
+        if (res.data) {
+          setInvoice(res.data);
+        }
       } catch (error) {
-        alert("Invoice not found");
+        if (!local) {
+          alert("Invoice not found");
+        }
       }
     };
 

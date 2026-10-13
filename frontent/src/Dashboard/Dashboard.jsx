@@ -6,6 +6,7 @@ import {
   FaChartLine,
 } from "react-icons/fa";
 import API from "../api";
+import { getStoredInvoices, syncWithServer } from "../services/invoiceStorage";
 
 const Dashboard = () => {
   const [invoiceCount, setInvoiceCount] = useState(0);
@@ -15,42 +16,40 @@ const Dashboard = () => {
   const [totalPaidAmount, setTotalPaidAmount] = useState(0);
   const [balanceAmount, setBalanceAmount] = useState(0);
 
+  const calculateStats = (invoices) => {
+    if (!Array.isArray(invoices) || invoices.length === 0) return;
+    setInvoiceCount(invoices.length);
+    const uniqueCustomers = new Set(
+      invoices.map((i) => i.customerName?.trim().toLowerCase()).filter(Boolean)
+    );
+    setTotalCustomers(uniqueCustomers.size);
+    const total = invoices.reduce((acc, i) => acc + (Number(i.totalAmount) || 0), 0);
+    const paid = invoices.reduce((acc, i) => acc + (Number(i.paidAmount) || 0), 0);
+    const balance = invoices.reduce(
+      (acc, i) => acc + (Number(i.balanceAmount ?? (Number(i.totalAmount || 0) - Number(i.paidAmount || 0))) || 0),
+      0
+    );
+    setTotalAmount(total);
+    setTotalPaidAmount(paid);
+    setBalanceAmount(balance);
+  };
+
   useEffect(() => {
+    // 1. Immediately calculate from stored invoices so dashboard loads with 0 delay
+    const initialList = getStoredInvoices();
+    calculateStats(initialList);
+    setLoading(false);
+
+    // 2. Fetch latest from backend and merge
     const fetchData = async () => {
       try {
-        const [
-          invoiceRes,
-          customerRes,
-          amountRes,
-          totalPaidRes,
-          balanceRes,
-        ] = await Promise.allSettled([
-          API.get("/api/invoices"),
-          API.get("/api/invoices/total-customers"),
-          API.get("/api/analytics/total-amount"),
-          API.get("/api/analytics/total-paid-amount"),
-          API.get("/api/analytics/total-balance"),
-        ]);
-
-        if (invoiceRes.status === "fulfilled" && Array.isArray(invoiceRes.value?.data)) {
-          setInvoiceCount(invoiceRes.value.data.length);
-        }
-        if (customerRes.status === "fulfilled") {
-          setTotalCustomers(customerRes.value?.data?.totalCustomers || 0);
-        }
-        if (amountRes.status === "fulfilled") {
-          setTotalAmount(amountRes.value?.data?.totalAmount || 0);
-        }
-        if (totalPaidRes.status === "fulfilled") {
-          setTotalPaidAmount(totalPaidRes.value?.data?.totalPaid || 0);
-        }
-        if (balanceRes.status === "fulfilled") {
-          setBalanceAmount(balanceRes.value?.data?.totalBalanceAmount || 0);
+        const res = await API.get("/api/invoices");
+        if (Array.isArray(res.data) && res.data.length > 0) {
+          const merged = syncWithServer(res.data);
+          calculateStats(merged);
         }
       } catch (error) {
-        console.error("Dashboard fetch error:", error);
-      } finally {
-        setLoading(false);
+        console.log("Server sync notice, using local stats:", error.message);
       }
     };
     fetchData();

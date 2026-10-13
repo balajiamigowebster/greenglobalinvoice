@@ -4,53 +4,81 @@ import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import API from "../api";
+import {
+  getStoredInvoices,
+  syncWithServer,
+  deleteInvoiceLocally,
+} from "../services/invoiceStorage";
 
 const InvoicesList = () => {
-  const [invoices, setInvoices] = useState([]);
+  // Initialize immediately from localStorage so list is instant and never wiped out
+  const [invoices, setInvoices] = useState(() => getStoredInvoices());
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
 
   useEffect(() => {
     fetchInvoices();
   }, []);
-  //console.log(invoices);
 
   const fetchInvoices = async (date) => {
-    setLoading(true);
     try {
       let url = "/api/invoices";
       if (date) {
-        //const isoDate = date.toISOString().split("T")[0];
         const localDate = date.toLocaleDateString("en-CA");
         url += `?date=${localDate}`;
       }
 
       const res = await API.get(url);
-      if (Array.isArray(res.data)) {
-        setInvoices(res.data);
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        const merged = syncWithServer(res.data);
+        if (date) {
+          const targetStr = date.toLocaleDateString("en-CA");
+          const filtered = merged.filter((inv) => {
+            if (!inv.invoiceDate) return false;
+            const d = new Date(inv.invoiceDate).toLocaleDateString("en-CA");
+            return d === targetStr;
+          });
+          setInvoices(filtered);
+        } else {
+          setInvoices(merged);
+        }
       } else {
-        setInvoices([]);
+        // Fallback to local stored invoices if server is empty or offline
+        const local = getStoredInvoices();
+        if (date) {
+          const targetStr = date.toLocaleDateString("en-CA");
+          const filtered = local.filter((inv) => {
+            if (!inv.invoiceDate) return false;
+            const d = new Date(inv.invoiceDate).toLocaleDateString("en-CA");
+            return d === targetStr;
+          });
+          setInvoices(filtered);
+        } else {
+          setInvoices(local);
+        }
       }
-      setLoading(false);
     } catch (error) {
-      console.error("Error loading invoices:", error);
-      setInvoices([]);
-    } finally {
-      setLoading(false);
+      console.log("Server fetch notice, using local storage:", error.message);
+      const local = getStoredInvoices();
+      setInvoices(local);
     }
   };
 
   const handleDelete = async (id) => {
     if (window.confirm("Are you sure you want to delete this invoice?")) {
+      // 1. Immediately delete from local storage and UI
+      deleteInvoiceLocally(id);
+      setInvoices((prev) =>
+        prev.filter((inv) => String(inv._id) !== String(id) && inv.invoiceNumber !== String(id))
+      );
+      toast.success("Invoice deleted");
+
+      // 2. Also send delete to backend
       try {
         await API.delete(`/api/invoices/${id}`);
-        //toast.success("Invoice deleted");
-        setTimeout(() => {
-          fetchInvoices();
-        }, 1300);
       } catch (error) {
-        toast.error("Delete failed");
+        console.log("Backend delete notice:", error.message);
       }
     }
   };
