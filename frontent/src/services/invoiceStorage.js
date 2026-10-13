@@ -121,6 +121,33 @@ export const DEFAULT_INVOICES = [
     balanceAmount: 654400,
     createAt: "2026-10-11T02:49:07.542Z",
   },
+  {
+    _id: "6ace33fce22acf7e9aa21bd0",
+    invoiceNumber: "INV0003",
+    customerName: "Suresh Kumar",
+    phone: "9845123456",
+    invoiceDate: "2026-10-13T00:00:00.000Z",
+    dueDate: "2026-10-13T00:00:00.000Z",
+    address: "Indiranagar, Bangalore",
+    products: [
+      {
+        title: "Garden Plants & Pathway Tiles",
+        description: "Premium decorative tiles and outdoor shrubs",
+        rate: 1200,
+        quantity: 15,
+        cgst: 9,
+        sgst: 9,
+        amount: 21240,
+        image: null,
+        _id: "6ace33fce22acf7e9aa21bd1",
+      },
+    ],
+    shippingCharge: 1500,
+    totalAmount: 22740,
+    paidAmount: 10000,
+    balanceAmount: 12740,
+    createAt: "2026-10-13T13:37:00.490Z",
+  },
 ];
 
 // Helper to extract numeric part of invoice number (e.g. "INV0002" -> 2)
@@ -132,7 +159,7 @@ export const parseInvoiceNumber = (invNum) => {
 
 // Generate next invoice number based on current list
 export const generateNextInvoiceNumber = (invoices) => {
-  let max = 2; // Default baseline is INV0002
+  let max = 3; // Default baseline is INV0003
   const list = Array.isArray(invoices) && invoices.length > 0 ? invoices : DEFAULT_INVOICES;
   for (const inv of list) {
     const num = parseInvoiceNumber(inv.invoiceNumber);
