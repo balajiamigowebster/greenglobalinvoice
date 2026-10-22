@@ -195,14 +195,25 @@ const NewBill = () => {
         });
         setTimeout(() => navigate("/invoices"), 900);
       } else {
-        // 1. Immediately save locally with generated invoice number and ID
+        // 1. Immediately save locally with guaranteed unique invoice number and ID
         const localSaved = saveInvoiceLocally(payload);
 
-        // 2. Also sync to backend
+        // 2. Also sync to backend, EXPLICITLY sending the unique invoiceNumber and _id!
+        const backendPayload = {
+          ...payload,
+          _id: localSaved._id,
+          invoiceNumber: localSaved.invoiceNumber,
+        };
+
         try {
-          const res = await API.post("/api/invoices", payload);
+          const res = await API.post("/api/invoices", backendPayload);
           if (res.data && res.data.invoice) {
-            updateInvoiceLocally(localSaved._id, res.data.invoice);
+            // Keep localSaved.invoiceNumber authoritative so backend never duplicates it!
+            updateInvoiceLocally(localSaved._id, {
+              ...res.data.invoice,
+              _id: res.data.invoice._id || localSaved._id,
+              invoiceNumber: localSaved.invoiceNumber,
+            });
           }
         } catch (backendErr) {
           console.log("Backend create sync note:", backendErr.message);
@@ -654,3 +665,4 @@ const NewBill = () => {
 };
 
 export default NewBill;
+

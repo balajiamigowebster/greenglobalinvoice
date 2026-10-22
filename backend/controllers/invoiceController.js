@@ -157,7 +157,7 @@ const loadCachedInvoices = () => {
     if (fs.existsSync(TMP_INVOICE_FILE)) {
       const data = JSON.parse(fs.readFileSync(TMP_INVOICE_FILE, "utf-8"));
       if (Array.isArray(data) && data.length > 0) {
-        return data;
+        return normalizeBackendInvoices(data);
       }
     }
   } catch (e) {}
@@ -174,6 +174,53 @@ const saveCachedInvoices = (list) => {
 memoryInvoices = loadCachedInvoices();
 
 const isDbAvailable = () => mongoose.connection.readyState === 1;
+
+const normalizeBackendInvoices = (list) => {
+  if (!Array.isArray(list) || list.length === 0) return [];
+  const seenIds = new Set();
+  const deduped = [];
+  for (const inv of list) {
+    const id = inv._id ? String(inv._id) : (inv.invoiceNumber ? String(inv.invoiceNumber) : Math.random().toString());
+    if (!seenIds.has(id)) {
+      seenIds.add(id);
+      deduped.push(inv);
+    }
+  }
+
+  deduped.sort((a, b) => {
+    const timeA = new Date(a.invoiceDate || a.createAt || 0).getTime();
+    const timeB = new Date(b.invoiceDate || b.createAt || 0).getTime();
+    return timeA - timeB;
+  });
+
+  const used = new Set();
+  const result = [];
+  for (const inv of deduped) {
+    let num = 0;
+    if (inv.invoiceNumber) {
+      const m = String(inv.invoiceNumber).match(/\d+/);
+      if (m) num = parseInt(m[0], 10);
+    }
+    if (!num || num < 2 || used.has(num)) {
+      let cand = 2;
+      while (used.has(cand)) cand++;
+      num = cand;
+    }
+    used.add(num);
+    result.push({
+      ...inv,
+      invoiceNumber: `INV${num.toString().padStart(4, "0")}`,
+    });
+  }
+
+  result.sort((a, b) => {
+    const numA = parseInt(String(a.invoiceNumber).replace(/\D/g, "") || "0", 10);
+    const numB = parseInt(String(b.invoiceNumber).replace(/\D/g, "") || "0", 10);
+    return numB - numA;
+  });
+
+  return result;
+};
 
 const computeNextInvoiceNumber = (list) => {
   let max = 3; // Baseline INV0003
@@ -280,7 +327,7 @@ exports.getAllInvoices = async (req, res) => {
   }
 
   // Fallback to memory invoices
-  res.json(memoryInvoices);
+  res.json(normalizeBackendInvoices(memoryInvoices));
 };
 
 exports.getInvoiceById = async (req, res) => {

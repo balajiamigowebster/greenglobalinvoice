@@ -10,6 +10,14 @@ import {
   deleteInvoiceLocally,
 } from "../services/invoiceStorage";
 
+const formatCurrency = (val) => {
+  const num = Number(val || 0);
+  return num.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+};
+
 const InvoicesList = () => {
   // Initialize immediately from localStorage so list is instant and never wiped out
   const [invoices, setInvoices] = useState(() => getStoredInvoices());
@@ -140,13 +148,13 @@ const InvoicesList = () => {
                   <td className="p-3 border">{invoice.customerName}</td>
                   <td className="p-3 border">{invoice.phone}</td>
                   <td className="p-3 border text-green-600 font-semibold">
-                    ₹{invoice.totalAmount}
+                    ₹{formatCurrency(invoice.totalAmount)}
                   </td>
                   <td className="p-3 border text-blue-600 font-medium">
-                    ₹{invoice.paidAmount}
+                    ₹{formatCurrency(invoice.paidAmount)}
                   </td>
                   <td className="p-3 border text-red-600 font-medium">
-                    ₹{invoice.balanceAmount}
+                    ₹{formatCurrency(invoice.balanceAmount)}
                   </td>
                   <td className="p-3 border">
                     {new Date(invoice.invoiceDate).toLocaleDateString()}
@@ -200,15 +208,15 @@ const InvoicesList = () => {
               </div>
               <div className="flex justify-between mb-2">
                 <span className="font-bold text-green-600">Total:</span>
-                <span>₹{invoice.totalAmount}</span>
+                <span>₹{formatCurrency(invoice.totalAmount)}</span>
               </div>
               <div className="flex justify-between mb-2">
                 <span className="font-bold text-blue-600">Paid:</span>
-                <span>₹{invoice.paidAmount}</span>
+                <span>₹{formatCurrency(invoice.paidAmount)}</span>
               </div>
               <div className="flex justify-between mb-2">
                 <span className="font-bold text-red-600">Balance:</span>
-                <span>₹{invoice.balanceAmount}</span>
+                <span>₹{formatCurrency(invoice.balanceAmount)}</span>
               </div>
               <div className="flex justify-between mb-2">
                 <span className="font-bold text-gray-700">Date:</span>

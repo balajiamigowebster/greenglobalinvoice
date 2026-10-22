@@ -1,10 +1,10 @@
 // Client-side storage manager for invoices
 // Ensures all invoices created by the user persist permanently in the browser
-// even if the backend is running in stateless serverless mode without a persistent database.
+// and strictly guarantees UNIQUE, sequential invoice numbers across all sessions.
 
 const STORAGE_KEY = "greenglobal_invoices";
 
-// Default seed invoice (INV0002 - Ramesh)
+// Default seed invoices
 export const DEFAULT_INVOICES = [
   {
     _id: "6acafd231ce92908f04a3ccb",
@@ -157,10 +157,73 @@ export const parseInvoiceNumber = (invNum) => {
   return match ? parseInt(match[0], 10) : 0;
 };
 
-// Generate next invoice number based on current list
+// Automatic sanitizer: guarantees every invoice has a UNIQUE sequential number
+// and rounds monetary amounts to 2 decimal places to avoid floating point issues
+export const normalizeInvoiceList = (invoices) => {
+  if (!Array.isArray(invoices) || invoices.length === 0) {
+    return [...DEFAULT_INVOICES];
+  }
+
+  // Deduplicate entries by _id
+  const seenIds = new Set();
+  const deduped = [];
+  for (const inv of invoices) {
+    const id = inv._id ? String(inv._id) : (inv.invoiceNumber ? String(inv.invoiceNumber) : Math.random().toString());
+    if (!seenIds.has(id)) {
+      seenIds.add(id);
+      deduped.push(inv);
+    }
+  }
+
+  // Sort ascending by date to preserve sequence and assign numbers chronologically
+  deduped.sort((a, b) => {
+    const timeA = new Date(a.invoiceDate || a.createAt || 0).getTime();
+    const timeB = new Date(b.invoiceDate || b.createAt || 0).getTime();
+    if (timeA !== timeB) return timeA - timeB;
+    return parseInvoiceNumber(a.invoiceNumber) - parseInvoiceNumber(b.invoiceNumber);
+  });
+
+  const usedNumbers = new Set();
+  const result = [];
+
+  for (const inv of deduped) {
+    let num = parseInvoiceNumber(inv.invoiceNumber);
+
+    // If number is missing, < 2, or already used by another invoice, allocate next available number
+    if (!num || num < 2 || usedNumbers.has(num)) {
+      let candidate = 2;
+      while (usedNumbers.has(candidate)) {
+        candidate++;
+      }
+      num = candidate;
+    }
+
+    usedNumbers.add(num);
+
+    const tot = Math.round(Number(inv.totalAmount || 0) * 100) / 100;
+    const paid = Math.round(Number(inv.paidAmount || 0) * 100) / 100;
+    const bal = Math.round(Number(inv.balanceAmount ?? (tot - paid)) * 100) / 100;
+    const ship = Math.round(Number(inv.shippingCharge || 0) * 100) / 100;
+
+    result.push({
+      ...inv,
+      invoiceNumber: `INV${num.toString().padStart(4, "0")}`,
+      totalAmount: tot,
+      paidAmount: paid,
+      balanceAmount: bal,
+      shippingCharge: ship,
+    });
+  }
+
+  // Sort descending by numeric invoice number (newest at top)
+  result.sort((a, b) => parseInvoiceNumber(b.invoiceNumber) - parseInvoiceNumber(a.invoiceNumber));
+  return result;
+};
+
+// Generate next unique invoice number based on current list
 export const generateNextInvoiceNumber = (invoices) => {
+  const list = normalizeInvoiceList(invoices || getStoredInvoices());
   let max = 3; // Default baseline is INV0003
-  const list = Array.isArray(invoices) && invoices.length > 0 ? invoices : DEFAULT_INVOICES;
   for (const inv of list) {
     const num = parseInvoiceNumber(inv.invoiceNumber);
     if (num > max) max = num;
@@ -169,20 +232,23 @@ export const generateNextInvoiceNumber = (invoices) => {
   return `INV${next.toString().padStart(4, "0")}`;
 };
 
-// Read invoices stored in localStorage
+// Read invoices stored in localStorage (automatically self-healing)
 export const getStoredInvoices = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      // First time loading: initialize with default invoices
       localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_INVOICES));
       return [...DEFAULT_INVOICES];
     }
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed;
+    const list = Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_INVOICES;
+    const normalized = normalizeInvoiceList(list);
+
+    // If normalization fixed duplicates or numbers, persist back
+    if (JSON.stringify(normalized) !== raw) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
     }
-    return [...DEFAULT_INVOICES];
+    return normalized;
   } catch (err) {
     console.error("Error reading localStorage invoices:", err);
     return [...DEFAULT_INVOICES];
@@ -192,30 +258,29 @@ export const getStoredInvoices = () => {
 // Save invoice array to localStorage
 export const setStoredInvoices = (invoices) => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(invoices));
+    const normalized = normalizeInvoiceList(invoices);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
   } catch (err) {
     console.error("Error writing localStorage invoices:", err);
   }
 };
 
-// Merge server invoices with local invoices
-// Preserves locally created/updated invoices even if server is stateless
+// Merge server invoices with local invoices while strictly maintaining unique numbers
 export const syncWithServer = (serverInvoices) => {
   const localList = getStoredInvoices();
   if (!Array.isArray(serverInvoices) || serverInvoices.length === 0) {
     return localList;
   }
 
-  // Create a map keyed by _id and invoiceNumber
   const mergedMap = new Map();
 
-  // First add all server invoices
+  // First add server invoices
   for (const inv of serverInvoices) {
-    if (inv._id) mergedMap.set(String(inv._id), inv);
-    if (inv.invoiceNumber) mergedMap.set(String(inv.invoiceNumber), inv);
+    const key = inv._id ? String(inv._id) : (inv.invoiceNumber ? String(inv.invoiceNumber) : null);
+    if (key) mergedMap.set(key, inv);
   }
 
-  // Then add/overwrite with local invoices so local additions/updates are never lost
+  // Overwrite or merge with local invoices, preserving local unique invoice numbers
   for (const inv of localList) {
     const key = inv._id ? String(inv._id) : (inv.invoiceNumber ? String(inv.invoiceNumber) : null);
     if (key) {
@@ -223,49 +288,41 @@ export const syncWithServer = (serverInvoices) => {
     }
   }
 
-  // Convert map values to array (deduplicated by _id)
-  const seenIds = new Set();
-  const result = [];
-  for (const inv of mergedMap.values()) {
-    const id = inv._id || inv.invoiceNumber;
-    if (id && !seenIds.has(id)) {
-      seenIds.add(id);
-      result.push(inv);
-    }
-  }
-
-  // Sort by invoiceDate or createAt descending
-  result.sort((a, b) => {
-    const dateA = new Date(a.invoiceDate || a.createAt || 0).getTime();
-    const dateB = new Date(b.invoiceDate || b.createAt || 0).getTime();
-    return dateB - dateA;
-  });
-
-  setStoredInvoices(result);
-  return result;
+  const combined = Array.from(mergedMap.values());
+  const normalized = normalizeInvoiceList(combined);
+  setStoredInvoices(normalized);
+  return normalized;
 };
 
-// Save a newly created invoice locally
+// Save a newly created invoice locally with guaranteed unique invoice number
 export const saveInvoiceLocally = (invoiceData) => {
   const currentList = getStoredInvoices();
   const invoiceNumber = invoiceData.invoiceNumber || generateNextInvoiceNumber(currentList);
   const _id = invoiceData._id || `local_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+  const tot = Math.round(Number(invoiceData.totalAmount || 0) * 100) / 100;
+  const paid = Math.round(Number(invoiceData.paidAmount || 0) * 100) / 100;
+  const bal = Math.round(Number(invoiceData.balanceAmount ?? (tot - paid)) * 100) / 100;
+  const ship = Math.round(Number(invoiceData.shippingCharge || 0) * 100) / 100;
 
   const newInvoice = {
     ...invoiceData,
     _id,
     invoiceNumber,
     createAt: invoiceData.createAt || new Date().toISOString(),
-    totalAmount: Number(invoiceData.totalAmount || 0),
-    paidAmount: Number(invoiceData.paidAmount || 0),
-    balanceAmount: Number(invoiceData.balanceAmount || 0),
-    shippingCharge: Number(invoiceData.shippingCharge || 0),
+    totalAmount: tot,
+    paidAmount: paid,
+    balanceAmount: bal,
+    shippingCharge: ship,
   };
 
-  // Add to top of list
-  const updatedList = [newInvoice, ...currentList.filter((inv) => String(inv._id) !== String(_id) && inv.invoiceNumber !== invoiceNumber)];
-  setStoredInvoices(updatedList);
-  return newInvoice;
+  const updatedList = [newInvoice, ...currentList.filter((inv) => String(inv._id) !== String(_id))];
+  const normalized = normalizeInvoiceList(updatedList);
+  setStoredInvoices(normalized);
+
+  return (
+    normalized.find((inv) => String(inv._id) === String(_id)) || newInvoice
+  );
 };
 
 // Update an existing invoice locally
@@ -276,17 +333,27 @@ export const updateInvoiceLocally = (id, updatedData) => {
   );
 
   if (index !== -1) {
+    const current = currentList[index];
+    const tot = Math.round(Number(updatedData.totalAmount ?? current.totalAmount ?? 0) * 100) / 100;
+    const paid = Math.round(Number(updatedData.paidAmount ?? current.paidAmount ?? 0) * 100) / 100;
+    const bal = Math.round(Number(updatedData.balanceAmount ?? (tot - paid)) * 100) / 100;
+    const ship = Math.round(Number(updatedData.shippingCharge ?? current.shippingCharge ?? 0) * 100) / 100;
+
     const updated = {
-      ...currentList[index],
+      ...current,
       ...updatedData,
-      totalAmount: Number(updatedData.totalAmount ?? currentList[index].totalAmount ?? 0),
-      paidAmount: Number(updatedData.paidAmount ?? currentList[index].paidAmount ?? 0),
-      balanceAmount: Number(updatedData.balanceAmount ?? currentList[index].balanceAmount ?? 0),
-      shippingCharge: Number(updatedData.shippingCharge ?? currentList[index].shippingCharge ?? 0),
+      _id: current._id, // Retain original ID
+      invoiceNumber: current.invoiceNumber, // Preserve authoritative unique number!
+      totalAmount: tot,
+      paidAmount: paid,
+      balanceAmount: bal,
+      shippingCharge: ship,
     };
+
     currentList[index] = updated;
-    setStoredInvoices(currentList);
-    return updated;
+    const normalized = normalizeInvoiceList(currentList);
+    setStoredInvoices(normalized);
+    return normalized.find((inv) => String(inv._id) === String(current._id)) || updated;
   } else {
     return saveInvoiceLocally({ ...updatedData, _id: id });
   }
@@ -298,8 +365,9 @@ export const deleteInvoiceLocally = (id) => {
   const filtered = currentList.filter(
     (inv) => String(inv._id) !== String(id) && inv.invoiceNumber !== String(id)
   );
-  setStoredInvoices(filtered);
-  return filtered;
+  const normalized = normalizeInvoiceList(filtered);
+  setStoredInvoices(normalized);
+  return normalized;
 };
 
 // Retrieve a single invoice by id or invoiceNumber
